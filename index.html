@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Cat vs Vacuums — Dodge Game!</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-wrapper">
+    <h1 id="game-title">🐱 Cat vs Vacuums 🌀</h1>
+    <canvas id="game-canvas" width="480" height="640"></canvas>
+    <p id="game-hint">Arrow keys to move • SPACE for Hiss Blast!</p>
+    <!-- Mobile touch controls -->
+    <div id="touch-controls">
+      <button class="touch-btn" id="btn-up" aria-label="Up">▲</button>
+      <div class="touch-row">
+        <button class="touch-btn" id="btn-left" aria-label="Left">◀</button>
+        <button class="touch-btn touch-hiss" id="btn-hiss" aria-label="Hiss Blast">HISS</button>
+        <button class="touch-btn" id="btn-right" aria-label="Right">▶</button>
+      </div>
+      <button class="touch-btn" id="btn-down" aria-label="Down">▼</button>
+    </div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
