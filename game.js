@@ -1,19 +1,27 @@
 // ============================================
 //  Cat vs Vacuums — Dodge Game Engine v2.0
 //  Features: Title screen, 9 lives, collectibles,
-//  waves, leaderboard, sound, touch, rainbow hiss
+//  waves, high score, sound, touch, rainbow hiss
 // ============================================
 
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 
-let W = canvas.width;   // 480
-let H = canvas.height;  // 640
+// ---- Internal game resolution (all game logic uses these) ----
+// Width is always 480. Height adapts to the screen's aspect ratio
+// so the game fills the entire screen on any device.
+const GAME_W = 480;
+var GAME_H = 640;  // will be recalculated on resize
+let W = GAME_W;
+let H = GAME_H;
+
+// Font scale — makes text readable on all screens
+var FSCALE = 1.15;
 
 // ============================================
 //  Game State Management
 // ============================================
-// States: 'title', 'playing', 'gameover', 'enterName'
+// States: 'title', 'playing', 'gameover'
 let gameState = 'title';
 
 let score = 0;
@@ -48,52 +56,34 @@ const TARGET_FPS = 60;
 const FRAME_DURATION = 1000 / TARGET_FPS;
 
 // ============================================
-//  Leaderboard (localStorage)
+//  High Score (localStorage)
 // ============================================
-const LEADERBOARD_KEY = 'catVsVacuums_leaderboard';
-let leaderboard = []; // [{name, score}, ...] top 3
+const HIGHSCORE_KEY = 'catVsVacuums_highscore';
+let savedHighScore = 0;
 
-function loadLeaderboard() {
+function loadHighScore() {
   try {
-    const data = localStorage.getItem(LEADERBOARD_KEY);
-    if (data) {
-      leaderboard = JSON.parse(data);
-    }
+    var data = localStorage.getItem(HIGHSCORE_KEY);
+    if (data) savedHighScore = parseInt(data, 10) || 0;
   } catch (e) {
-    leaderboard = [];
-  }
-  // Ensure we always have an array
-  if (!Array.isArray(leaderboard)) leaderboard = [];
-}
-
-function saveLeaderboard() {
-  try {
-    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(leaderboard));
-  } catch (e) {
-    // silently fail
+    savedHighScore = 0;
   }
 }
 
-function addToLeaderboard(name, finalScore) {
-  leaderboard.push({ name: name, score: finalScore });
-  leaderboard.sort(function (a, b) { return b.score - a.score; });
-  leaderboard = leaderboard.slice(0, 3); // keep top 3
-  saveLeaderboard();
+function saveHighScore(finalScore) {
+  if (finalScore > savedHighScore) {
+    savedHighScore = finalScore;
+    try {
+      localStorage.setItem(HIGHSCORE_KEY, String(savedHighScore));
+    } catch (e) {}
+  }
 }
 
-function isHighScore(finalScore) {
-  if (leaderboard.length < 3) return true;
-  return finalScore > leaderboard[leaderboard.length - 1].score;
+function isNewHighScore(finalScore) {
+  return finalScore > savedHighScore;
 }
 
-loadLeaderboard();
-
-// ============================================
-//  Name Entry State
-// ============================================
-let nameEntryText = '';
-let nameEntryCursorBlink = 0;
-const MAX_NAME_LENGTH = 8;
+loadHighScore();
 
 // ============================================
 //  Sound Engine (Web Audio API)
@@ -209,14 +199,149 @@ function sfxLaserZap() {
   playTone(800, 0.08, 'square', 0.03, 0.03);
 }
 
-// ============================================
-//  Canvas Resize Handler
-// ============================================
-function resizeCanvas() {
-  W = canvas.width;
-  H = canvas.height;
+function sfxFart() {
+  // Low rumbling "fart" — descending low-freq buzz + noise burst
+  playTone(80, 0.35, 'sawtooth', 0.14);
+  playTone(65, 0.25, 'square', 0.10, 0.05);
+  playTone(50, 0.3, 'sawtooth', 0.08, 0.15);
+  playNoise(0.2, 0.10);
+  // Wobble for comedic effect
+  playTone(90, 0.08, 'sawtooth', 0.06, 0.25);
+  playTone(70, 0.08, 'sawtooth', 0.06, 0.30);
+  playTone(55, 0.15, 'sawtooth', 0.05, 0.35);
 }
+
+function sfxAngryCatMeow() {
+  // Aggressive yowl — fast rising screech then drops off
+  playTone(400, 0.06, 'sawtooth', 0.12);
+  playTone(900, 0.12, 'sawtooth', 0.14, 0.04);
+  playTone(1100, 0.08, 'sine', 0.10, 0.10);
+  playTone(700, 0.15, 'sawtooth', 0.12, 0.16);
+  playTone(500, 0.12, 'sine', 0.08, 0.26);
+  playNoise(0.06, 0.08); // hiss undertone
+}
+
+// ============================================
+//  Canvas Resize — Adaptive Resolution
+// ============================================
+// Width stays at 480. Height adapts to fill the screen's aspect
+// ratio so the game uses the full display on any device.
+// On a phone (e.g. S24 at ~9:19.5) H becomes ~1040.
+// On a 3:4 monitor, H stays ~640.
+
+var isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+// Helper: create a scaled font string
+function sf(basePx) {
+  return Math.round(basePx * FSCALE) + 'px "Press Start 2P", monospace';
+}
+
+function resizeCanvas() {
+  var availW = window.innerWidth;
+  var availH = window.innerHeight;
+
+  // On desktop, account for title/hint text above canvas
+  if (!isMobile) {
+    var titleEl = document.getElementById('game-title');
+    var hintEl = document.getElementById('game-hint');
+    var extraH = 0;
+    if (titleEl && titleEl.offsetHeight) extraH += titleEl.offsetHeight + 16;
+    if (hintEl && hintEl.offsetHeight) extraH += hintEl.offsetHeight + 16;
+    availH -= extraH;
+  }
+
+  // Calculate internal game height to match screen aspect ratio
+  // Keep width at 480, scale height proportionally
+  var screenAspect = availH / availW;
+  GAME_H = Math.round(GAME_W * screenAspect);
+  // Clamp to reasonable range
+  if (GAME_H < 580) GAME_H = 580;
+  if (GAME_H > 1200) GAME_H = 1200;
+
+  W = GAME_W;
+  H = GAME_H;
+
+  // Set internal resolution
+  canvas.width = W;
+  canvas.height = H;
+
+  // Set display size to fill screen
+  // Calculate display size maintaining our computed aspect
+  var displayAspect = W / H;
+  var fitW = availW;
+  var fitH = fitW / displayAspect;
+  if (fitH > availH) {
+    fitH = availH;
+    fitW = fitH * displayAspect;
+  }
+
+  canvas.style.width = Math.floor(fitW) + 'px';
+  canvas.style.height = Math.floor(fitH) + 'px';
+
+  // Update hiss button position (it uses H)
+  if (typeof updateHissBtnPosition === 'function') {
+    updateHissBtnPosition();
+  }
+
+  // Rebuild stars for new dimensions
+  if (typeof stars !== 'undefined' && stars.length > 0) {
+    stars.length = 0;
+    createStars();
+  }
+
+  // Reposition cat if it's off screen
+  if (typeof cat !== 'undefined' && cat.y + CAT_SIZE > H) {
+    cat.y = H - 80;
+  }
+}
+
 window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', function () {
+  setTimeout(resizeCanvas, 150);
+});
+
+// ============================================
+//  Fullscreen API
+// ============================================
+var isFullscreen = false;
+
+function requestFullscreen() {
+  var el = document.documentElement;
+  if (el.requestFullscreen) {
+    el.requestFullscreen().catch(function () {});
+  } else if (el.webkitRequestFullscreen) {
+    el.webkitRequestFullscreen(); // Safari/iOS
+  } else if (el.msRequestFullscreen) {
+    el.msRequestFullscreen();
+  }
+}
+
+function exitFullscreen() {
+  if (document.exitFullscreen) {
+    document.exitFullscreen().catch(function () {});
+  } else if (document.webkitExitFullscreen) {
+    document.webkitExitFullscreen();
+  }
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    exitFullscreen();
+  } else {
+    requestFullscreen();
+  }
+}
+
+function onFullscreenChange() {
+  isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  setTimeout(resizeCanvas, 100);
+}
+
+document.addEventListener('fullscreenchange', onFullscreenChange);
+document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+// Fullscreen button position (drawn on title screen)
+var fullscreenBtn = { x: 0, y: 0, w: 0, h: 0 };
 
 // ============================================
 //  Input Tracking
@@ -228,6 +353,12 @@ window.addEventListener('keydown', function (e) {
     e.preventDefault();
   }
 
+  // Fullscreen toggle (F key) — works on any screen
+  if (e.key === 'f' || e.key === 'F') {
+    toggleFullscreen();
+    return;
+  }
+
   // Title screen → start game
   if (e.key === 'Enter' && gameState === 'title') {
     initAudio();
@@ -236,34 +367,10 @@ window.addEventListener('keydown', function (e) {
     return;
   }
 
-  // Game over → go to name entry or restart
+  // Game over → restart
   if (e.key === 'Enter' && gameState === 'gameover') {
     initAudio();
-    var finalScore = Math.floor(score) + bonusScore;
-    if (isHighScore(finalScore)) {
-      gameState = 'enterName';
-      nameEntryText = '';
-    } else {
-      restartGame();
-    }
-    return;
-  }
-
-  // Name entry input
-  if (gameState === 'enterName') {
-    if (e.key === 'Enter' && nameEntryText.length > 0) {
-      addToLeaderboard(nameEntryText, Math.floor(score) + bonusScore);
-      restartGame();
-      return;
-    }
-    if (e.key === 'Backspace') {
-      nameEntryText = nameEntryText.slice(0, -1);
-      return;
-    }
-    if (e.key.length === 1 && nameEntryText.length < MAX_NAME_LENGTH) {
-      nameEntryText += e.key.toUpperCase();
-      return;
-    }
+    restartGame();
     return;
   }
 
@@ -278,61 +385,253 @@ window.addEventListener('keyup', function (e) {
 });
 
 // ============================================
-//  Mobile Touch Controls
+//  Mobile Touch Controls — Virtual Joystick
 // ============================================
 var touchState = { up: false, down: false, left: false, right: false };
 
-function setupTouchControls() {
-  var btnUp = document.getElementById('btn-up');
-  var btnDown = document.getElementById('btn-down');
-  var btnLeft = document.getElementById('btn-left');
-  var btnRight = document.getElementById('btn-right');
-  var btnHiss = document.getElementById('btn-hiss');
+// Joystick state
+var joystick = {
+  active: false,
+  touchId: null,
+  baseX: 0,       // center of joystick (game coords)
+  baseY: 0,
+  stickX: 0,      // current stick position (game coords)
+  stickY: 0,
+  dx: 0,          // normalized direction -1 to 1
+  dy: 0,
+  radius: 50,     // joystick outer radius
+  deadzone: 8,    // minimum movement before registering
+};
 
-  function bindBtn(el, dir) {
-    el.addEventListener('touchstart', function (e) {
-      e.preventDefault();
-      initAudio();
-      if (gameState === 'title') { sfxStart(); startGame(); return; }
-      touchState[dir] = true;
-    });
-    el.addEventListener('touchend', function (e) {
-      e.preventDefault();
-      touchState[dir] = false;
-    });
-    el.addEventListener('touchcancel', function (e) {
-      touchState[dir] = false;
-    });
-  }
+// Hiss button state (drawn on canvas)
+var hissBtn = {
+  x: 0, y: 0, radius: 35, pressed: false, touchId: null,
+};
 
-  bindBtn(btnUp, 'up');
-  bindBtn(btnDown, 'down');
-  bindBtn(btnLeft, 'left');
-  bindBtn(btnRight, 'right');
+// Convert a touch's page coordinates to game (canvas) coordinates
+function touchToGame(touch) {
+  var rect = canvas.getBoundingClientRect();
+  var scaleX = GAME_W / rect.width;
+  var scaleY = GAME_H / rect.height;
+  return {
+    x: (touch.clientX - rect.left) * scaleX,
+    y: (touch.clientY - rect.top) * scaleY,
+  };
+}
 
-  btnHiss.addEventListener('touchstart', function (e) {
-    e.preventDefault();
-    initAudio();
-    if (gameState === 'title') { sfxStart(); startGame(); return; }
-    if (gameState === 'playing') activateHissBlast();
+function updateHissBtnPosition() {
+  hissBtn.x = W - 65;
+  hissBtn.y = H - 75;
+}
+updateHissBtnPosition();
+
+function isInsideHissBtn(gx, gy) {
+  var dx = gx - hissBtn.x;
+  var dy = gy - hissBtn.y;
+  return (dx * dx + dy * dy) <= (hissBtn.radius + 10) * (hissBtn.radius + 10);
+}
+
+function handleTouchStart(e) {
+  e.preventDefault();
+  initAudio();
+
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var touch = e.changedTouches[i];
+    var gp = touchToGame(touch);
+
+    // Title screen
+    if (gameState === 'title') {
+      // Check fullscreen button first
+      if (gp.x >= fullscreenBtn.x && gp.x <= fullscreenBtn.x + fullscreenBtn.w &&
+          gp.y >= fullscreenBtn.y && gp.y <= fullscreenBtn.y + fullscreenBtn.h) {
+        toggleFullscreen();
+        return;
+      }
+      sfxStart();
+      startGame();
+      return;
+    }
+
+    // Game over — any tap restarts
     if (gameState === 'gameover') {
-      var finalScore = Math.floor(score) + bonusScore;
-      if (isHighScore(finalScore)) {
-        gameState = 'enterName';
-        nameEntryText = '';
-      } else {
-        restartGame();
+      restartGame();
+      return;
+    }
+
+    // Playing state — check hiss button first (right side)
+    if (gameState === 'playing') {
+      if (isInsideHissBtn(gp.x, gp.y)) {
+        hissBtn.pressed = true;
+        hissBtn.touchId = touch.identifier;
+        activateHissBlast();
+        continue;
+      }
+
+      // Left side of screen = joystick zone
+      if (!joystick.active && gp.x < W * 0.6) {
+        joystick.active = true;
+        joystick.touchId = touch.identifier;
+        joystick.baseX = gp.x;
+        joystick.baseY = gp.y;
+        joystick.stickX = gp.x;
+        joystick.stickY = gp.y;
+        joystick.dx = 0;
+        joystick.dy = 0;
       }
     }
-  });
-
-  // Also allow tapping the canvas to start from title
-  canvas.addEventListener('touchstart', function (e) {
-    initAudio();
-    if (gameState === 'title') { sfxStart(); startGame(); }
-  });
+  }
 }
-setupTouchControls();
+
+function handleTouchMove(e) {
+  e.preventDefault();
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var touch = e.changedTouches[i];
+
+    if (joystick.active && touch.identifier === joystick.touchId) {
+      var gp = touchToGame(touch);
+      joystick.stickX = gp.x;
+      joystick.stickY = gp.y;
+
+      var rawDx = gp.x - joystick.baseX;
+      var rawDy = gp.y - joystick.baseY;
+      var dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+
+      if (dist < joystick.deadzone) {
+        joystick.dx = 0;
+        joystick.dy = 0;
+      } else {
+        // Clamp to joystick radius
+        if (dist > joystick.radius) {
+          rawDx = (rawDx / dist) * joystick.radius;
+          rawDy = (rawDy / dist) * joystick.radius;
+          joystick.stickX = joystick.baseX + rawDx;
+          joystick.stickY = joystick.baseY + rawDy;
+        }
+        joystick.dx = rawDx / joystick.radius;
+        joystick.dy = rawDy / joystick.radius;
+      }
+    }
+  }
+}
+
+function handleTouchEnd(e) {
+  e.preventDefault();
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var touch = e.changedTouches[i];
+
+    if (joystick.active && touch.identifier === joystick.touchId) {
+      joystick.active = false;
+      joystick.touchId = null;
+      joystick.dx = 0;
+      joystick.dy = 0;
+    }
+
+    if (hissBtn.pressed && touch.identifier === hissBtn.touchId) {
+      hissBtn.pressed = false;
+      hissBtn.touchId = null;
+    }
+  }
+}
+
+canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+// Draw virtual joystick on canvas (called during game render)
+function drawTouchControls() {
+  if (!isMobile) return;
+  if (gameState !== 'playing') return;
+
+  ctx.save();
+
+  // --- Joystick ---
+  if (joystick.active) {
+    // Outer ring
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(joystick.baseX, joystick.baseY, joystick.radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner stick
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(joystick.stickX, joystick.stickY, 18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stick center dot
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = '#ff6bef';
+    ctx.beginPath();
+    ctx.arc(joystick.stickX, joystick.stickY, 6, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // Show a subtle hint where to touch
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(90, H - 100, joystick.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = sf(7);
+    ctx.textAlign = 'center';
+    ctx.fillText('TOUCH TO', 90, H - 105);
+    ctx.fillText('MOVE', 90, H - 93);
+  }
+
+  // --- Hiss Blast Button ---
+  var isReady = hissCooldownTimer <= 0;
+  ctx.globalAlpha = isReady ? 0.5 : 0.2;
+
+  // Button circle
+  ctx.beginPath();
+  ctx.arc(hissBtn.x, hissBtn.y, hissBtn.radius, 0, Math.PI * 2);
+
+  if (isReady) {
+    // Rainbow gradient fill when ready
+    var grad = ctx.createRadialGradient(hissBtn.x, hissBtn.y, 0, hissBtn.x, hissBtn.y, hissBtn.radius);
+    grad.addColorStop(0, '#FFD700');
+    grad.addColorStop(0.5, '#FF6600');
+    grad.addColorStop(1, '#FF006688');
+    ctx.fillStyle = grad;
+  } else {
+    ctx.fillStyle = '#333355';
+  }
+  ctx.fill();
+
+  // Button border
+  ctx.globalAlpha = isReady ? 0.7 : 0.3;
+  ctx.strokeStyle = isReady ? '#FFD700' : '#555577';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Button text
+  ctx.globalAlpha = isReady ? 0.9 : 0.4;
+  ctx.fillStyle = isReady ? '#FFFFFF' : '#888888';
+  ctx.font = sf(8);
+  ctx.textAlign = 'center';
+  ctx.fillText('HISS', hissBtn.x, hissBtn.y - 2);
+  ctx.font = sf(6);
+  ctx.fillText('BLAST', hissBtn.x, hissBtn.y + 10);
+
+  // Cooldown number overlay
+  if (!isReady) {
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = '#00D4FF';
+    ctx.font = sf(12);
+    ctx.fillText(Math.ceil(hissCooldownTimer), hissBtn.x, hissBtn.y + 4);
+  }
+
+  ctx.restore();
+}
 
 // ============================================
 //  Scrolling Starfield
@@ -446,10 +745,17 @@ function resetCat() {
 resetCat();
 
 function updateCat(dt) {
-  if (keys['ArrowLeft'] || touchState.left)  cat.x -= CAT_SPEED * dt;
-  if (keys['ArrowRight'] || touchState.right) cat.x += CAT_SPEED * dt;
-  if (keys['ArrowUp'] || touchState.up)    cat.y -= CAT_SPEED * dt;
-  if (keys['ArrowDown'] || touchState.down)  cat.y += CAT_SPEED * dt;
+  // Keyboard input
+  if (keys['ArrowLeft'])  cat.x -= CAT_SPEED * dt;
+  if (keys['ArrowRight']) cat.x += CAT_SPEED * dt;
+  if (keys['ArrowUp'])    cat.y -= CAT_SPEED * dt;
+  if (keys['ArrowDown'])  cat.y += CAT_SPEED * dt;
+
+  // Virtual joystick input (analog — speed scales with how far you drag)
+  if (joystick.active) {
+    cat.x += joystick.dx * CAT_SPEED * dt;
+    cat.y += joystick.dy * CAT_SPEED * dt;
+  }
 
   if (cat.x < 0) cat.x = 0;
   if (cat.x + CAT_SIZE > W) cat.x = W - CAT_SIZE;
@@ -1044,7 +1350,7 @@ function drawCollectibles() {
     ctx.save();
     ctx.globalAlpha = p.life;
     ctx.fillStyle = p.color;
-    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.font = sf(10);
     ctx.textAlign = 'center';
     ctx.shadowColor = p.color;
     ctx.shadowBlur = 6;
@@ -1084,6 +1390,7 @@ function checkAllCollisions() {
     if (checkAABBCollision(cat, vacuums[i])) {
       lives--;
       sfxHit();
+      sfxAngryCatMeow();
 
       // Remove the vacuum that hit us
       vacuums.splice(i, 1);
@@ -1176,14 +1483,14 @@ function drawWaveAnnouncement() {
 
   // Wave name (big)
   ctx.fillStyle = waveAnnounceColor;
-  ctx.font = '18px "Press Start 2P", monospace';
+  ctx.font = sf(18);
   ctx.textAlign = 'center';
   ctx.shadowColor = waveAnnounceColor;
   ctx.shadowBlur = 20;
   ctx.fillText(waveAnnounceName, W / 2, H / 2 - 30);
 
   // Subtitle
-  ctx.font = '10px "Press Start 2P", monospace';
+  ctx.font = sf(10);
   ctx.fillText(waveAnnounceSubtitle, W / 2, H / 2);
 
   ctx.restore();
@@ -1394,7 +1701,7 @@ function drawCooldownBar() {
   }
 
   // Label
-  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.font = sf(8);
   ctx.textAlign = 'right';
   if (isReady) {
     ctx.shadowColor = '#FFD700';
@@ -1408,7 +1715,7 @@ function drawCooldownBar() {
   }
 
   // Timer / Ready
-  ctx.font = '7px "Press Start 2P", monospace';
+  ctx.font = sf(7);
   ctx.textAlign = 'left';
   if (isReady) {
     if (Math.floor(Date.now() / 400) % 2 === 0) {
@@ -1439,6 +1746,7 @@ function resetHissBlast() {
 
 function activateMegaChonk() {
   sfxMegaChonk();
+  sfxFart();
   // Brief shrink animation before lasers start
   chonkShrinkTimer = CHONK_SHRINK_DURATION;
   chonkAnnouncementTimer = CHONK_ANNOUNCE_DURATION;
@@ -1637,7 +1945,7 @@ function drawChonkAnnouncement() {
 
   // "MEGA CHONK MODE" in big red glowing text
   ctx.fillStyle = '#FF4400';
-  ctx.font = '14px "Press Start 2P", monospace';
+  ctx.font = sf(14);
   ctx.textAlign = 'center';
   ctx.shadowColor = '#FF0000';
   ctx.shadowBlur = 25;
@@ -1646,7 +1954,7 @@ function drawChonkAnnouncement() {
 
   // Timer remaining
   if (megaChonkActive) {
-    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.font = sf(8);
     ctx.fillStyle = '#FFDD00';
     ctx.shadowColor = '#FFDD00';
     ctx.shadowBlur = 8;
@@ -1665,7 +1973,7 @@ function drawChonkHUD() {
     var hudY = H - 52;
 
     ctx.fillStyle = '#FF8C00';
-    ctx.font = '7px "Press Start 2P", monospace';
+    ctx.font = sf(7);
     ctx.textAlign = 'left';
 
     if (megaChonkActive) {
@@ -1731,7 +2039,7 @@ function drawHUD() {
   ctx.shadowColor = '#00ff88';
   ctx.shadowBlur = 6;
   ctx.fillStyle = '#00ff88';
-  ctx.font = '10px "Press Start 2P", monospace';
+  ctx.font = sf(10);
   ctx.textAlign = 'left';
   ctx.fillText('TIME', 12, 20);
 
@@ -1739,26 +2047,26 @@ function drawHUD() {
   ctx.shadowColor = '#ffd60a';
   ctx.shadowBlur = 4;
   ctx.fillStyle = '#ffd60a';
-  ctx.font = '14px "Press Start 2P", monospace';
+  ctx.font = sf(14);
   ctx.fillText(Math.floor(score) + 's', 12, 38);
 
   // Bonus score
   ctx.shadowColor = '#FF69B4';
   ctx.shadowBlur = 4;
   ctx.fillStyle = '#FF69B4';
-  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.font = sf(8);
   ctx.fillText('BONUS: ' + bonusScore, 12, 52);
 
   // Total score
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#45fffc';
-  ctx.font = '7px "Press Start 2P", monospace';
+  ctx.font = sf(7);
   ctx.fillText('TOTAL: ' + (Math.floor(score) + bonusScore), 12, 64);
 
   // Lives — draw cat face icons
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#ff6b9d';
-  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.font = sf(8);
   ctx.textAlign = 'right';
   ctx.fillText('LIVES', W - 12, 20);
 
@@ -1771,7 +2079,7 @@ function drawHUD() {
 
   // Vacuum spawn rate
   ctx.fillStyle = '#FF6B6B';
-  ctx.font = '7px "Press Start 2P", monospace';
+  ctx.font = sf(7);
   ctx.textAlign = 'right';
   ctx.fillText('Vac/s: ' + vacuumSpawnRate, W - 10, lives > 5 ? 58 : 48);
 
@@ -1823,7 +2131,7 @@ function drawTitleScreen() {
 
   // Title text
   ctx.fillStyle = '#ffda45';
-  ctx.font = '20px "Press Start 2P", monospace';
+  ctx.font = sf(20);
   ctx.textAlign = 'center';
   ctx.shadowColor = '#ff6bef';
   ctx.shadowBlur = 20;
@@ -1834,35 +2142,57 @@ function drawTitleScreen() {
   // Start prompt (blinking)
   if (Math.floor(Date.now() / 600) % 2 === 0) {
     ctx.fillStyle = '#00FF41';
-    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.font = sf(10);
     ctx.shadowColor = '#00FF41';
     ctx.shadowBlur = 8;
-    ctx.fillText('Press ENTER to Start', W / 2, H / 2 + 50);
+    ctx.fillText(isMobile ? 'Tap to Start' : 'Press ENTER to Start', W / 2, H / 2 + 50);
     ctx.shadowBlur = 0;
   }
 
   // Controls hint
   ctx.fillStyle = '#45fffc';
-  ctx.font = '7px "Press Start 2P", monospace';
+  ctx.font = sf(7);
   ctx.globalAlpha = 0.7;
-  ctx.fillText('Arrow Keys to Move', W / 2, H / 2 + 80);
-  ctx.fillText('SPACE for Hiss Blast', W / 2, H / 2 + 95);
-
-  // Leaderboard on title screen
-  if (leaderboard.length > 0) {
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#8338ec';
-    ctx.font = '9px "Press Start 2P", monospace';
-    ctx.fillText('LEADERBOARD', W / 2, H / 2 + 130);
-
-    for (var i = 0; i < leaderboard.length; i++) {
-      var entry = leaderboard[i];
-      var medal = i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32';
-      ctx.fillStyle = medal;
-      ctx.font = '8px "Press Start 2P", monospace';
-      ctx.fillText((i + 1) + '. ' + entry.name + ' - ' + entry.score, W / 2, H / 2 + 150 + i * 18);
-    }
+  if (isMobile) {
+    ctx.fillText('Drag to Move', W / 2, H / 2 + 80);
+    ctx.fillText('HISS button for Blast', W / 2, H / 2 + 95);
+  } else {
+    ctx.fillText('Arrow Keys to Move', W / 2, H / 2 + 80);
+    ctx.fillText('SPACE for Hiss Blast', W / 2, H / 2 + 95);
   }
+
+  // High score on title screen
+  if (savedHighScore > 0) {
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = sf(8);
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 6;
+    ctx.fillText('BEST: ' + savedHighScore, W / 2, H / 2 + 130);
+    ctx.shadowBlur = 0;
+  }
+
+  // Fullscreen button
+  ctx.globalAlpha = 0.8;
+  var fsBtnW = 180;
+  var fsBtnH = 30;
+  var fsBtnX = W / 2 - fsBtnW / 2;
+  var fsBtnY = H - 60;
+  fullscreenBtn.x = fsBtnX;
+  fullscreenBtn.y = fsBtnY;
+  fullscreenBtn.w = fsBtnW;
+  fullscreenBtn.h = fsBtnH;
+
+  ctx.strokeStyle = '#45fffc';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(fsBtnX, fsBtnY, fsBtnW, fsBtnH);
+  ctx.fillStyle = 'rgba(69, 255, 252, 0.1)';
+  ctx.fillRect(fsBtnX, fsBtnY, fsBtnW, fsBtnH);
+
+  ctx.fillStyle = '#45fffc';
+  ctx.font = sf(7);
+  ctx.fillText(isFullscreen ? '[ EXIT FULLSCREEN ]' : '[ FULLSCREEN ]', W / 2, fsBtnY + 20);
+  ctx.globalAlpha = 1;
 
   ctx.restore();
 }
@@ -1881,41 +2211,41 @@ function drawGameOver() {
   ctx.shadowColor = '#ff006e';
   ctx.shadowBlur = 16;
   ctx.fillStyle = '#ff006e';
-  ctx.font = '22px "Press Start 2P", monospace';
+  ctx.font = sf(22);
   ctx.textAlign = 'center';
   ctx.fillText('GAME OVER', W / 2, H / 2 - 90);
   ctx.shadowBlur = 0;
 
   // Survived time
   ctx.fillStyle = '#ffffff';
-  ctx.font = '9px "Press Start 2P", monospace';
+  ctx.font = sf(9);
   ctx.fillText('You survived', W / 2, H / 2 - 55);
 
   ctx.shadowColor = '#ffd60a';
   ctx.shadowBlur = 10;
   ctx.fillStyle = '#ffd60a';
-  ctx.font = '22px "Press Start 2P", monospace';
+  ctx.font = sf(22);
   ctx.fillText(Math.floor(score) + 's', W / 2, H / 2 - 28);
   ctx.shadowBlur = 0;
 
   // Bonus
   ctx.fillStyle = '#FF69B4';
-  ctx.font = '9px "Press Start 2P", monospace';
+  ctx.font = sf(9);
   ctx.fillText('Bonus: ' + bonusScore, W / 2, H / 2 - 5);
 
   // Total
   ctx.fillStyle = '#45fffc';
-  ctx.font = '12px "Press Start 2P", monospace';
+  ctx.font = sf(12);
   ctx.shadowColor = '#45fffc';
   ctx.shadowBlur = 8;
   ctx.fillText('TOTAL: ' + finalScore, W / 2, H / 2 + 20);
   ctx.shadowBlur = 0;
 
   // High score message
-  if (isHighScore(finalScore)) {
+  if (isNewHighScore(finalScore)) {
     if (Math.floor(Date.now() / 300) % 2 === 0) {
       ctx.fillStyle = '#FFD700';
-      ctx.font = '10px "Press Start 2P", monospace';
+      ctx.font = sf(10);
       ctx.shadowColor = '#FFD700';
       ctx.shadowBlur = 12;
       ctx.fillText('NEW HIGH SCORE!', W / 2, H / 2 + 50);
@@ -1923,87 +2253,22 @@ function drawGameOver() {
     }
   }
 
-  // Leaderboard
-  if (leaderboard.length > 0) {
+  // Best score
+  if (savedHighScore > 0) {
     ctx.fillStyle = '#8338ec';
-    ctx.font = '8px "Press Start 2P", monospace';
-    ctx.fillText('LEADERBOARD', W / 2, H / 2 + 75);
-    for (var i = 0; i < leaderboard.length; i++) {
-      var entry = leaderboard[i];
-      var medal = i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32';
-      ctx.fillStyle = medal;
-      ctx.fillText((i + 1) + '. ' + entry.name + ' - ' + entry.score, W / 2, H / 2 + 93 + i * 15);
-    }
+    ctx.font = sf(8);
+    ctx.fillText('BEST: ' + savedHighScore, W / 2, H / 2 + 80);
   }
 
   // Restart hint
   ctx.fillStyle = '#00ff88';
-  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.font = sf(8);
   if (Math.floor(Date.now() / 500) % 2 === 0) {
     ctx.shadowColor = '#00ff88';
     ctx.shadowBlur = 6;
-    if (isHighScore(finalScore)) {
-      ctx.fillText('ENTER to save score', W / 2, H / 2 + 150);
-    } else {
-      ctx.fillText('ENTER to restart', W / 2, H / 2 + 150);
-    }
+    ctx.fillText(isMobile ? 'Tap to restart' : 'ENTER to restart', W / 2, H / 2 + 120);
     ctx.shadowBlur = 0;
   }
-
-  ctx.restore();
-}
-
-// ============================================
-//  Name Entry Screen
-// ============================================
-function drawNameEntry() {
-  ctx.save();
-  ctx.fillStyle = 'rgba(10, 10, 46, 0.85)';
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = '#FFD700';
-  ctx.font = '16px "Press Start 2P", monospace';
-  ctx.textAlign = 'center';
-  ctx.shadowColor = '#FFD700';
-  ctx.shadowBlur = 12;
-  ctx.fillText('HIGH SCORE!', W / 2, H / 2 - 80);
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = '#45fffc';
-  ctx.font = '24px "Press Start 2P", monospace';
-  ctx.fillText(Math.floor(score) + bonusScore, W / 2, H / 2 - 45);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '9px "Press Start 2P", monospace';
-  ctx.fillText('Enter your name:', W / 2, H / 2 - 10);
-
-  // Name input box
-  var boxW = 180;
-  var boxH = 30;
-  var boxX = W / 2 - boxW / 2;
-  var boxY = H / 2 + 5;
-
-  ctx.strokeStyle = '#ff6bef';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-  // Name text
-  nameEntryCursorBlink += 0.05;
-  var displayText = nameEntryText;
-  if (Math.floor(nameEntryCursorBlink * 3) % 2 === 0) {
-    displayText += '_';
-  }
-
-  ctx.fillStyle = '#FFD700';
-  ctx.font = '14px "Press Start 2P", monospace';
-  ctx.fillText(displayText, W / 2, boxY + 21);
-
-  // Hint
-  ctx.fillStyle = '#00ff88';
-  ctx.font = '7px "Press Start 2P", monospace';
-  ctx.globalAlpha = 0.7;
-  ctx.fillText('Press ENTER to save', W / 2, boxY + 55);
-  ctx.fillText('(max ' + MAX_NAME_LENGTH + ' chars)', W / 2, boxY + 70);
 
   ctx.restore();
 }
@@ -2046,6 +2311,10 @@ function restartGame() {
 function triggerGameOver() {
   if (gameState !== 'playing') return;
   gameState = 'gameover';
+
+  // Save high score
+  var finalScore = Math.floor(score) + bonusScore;
+  saveHighScore(finalScore);
 
   sfxGameOver();
 
@@ -2122,6 +2391,7 @@ function gameLoop(timestamp) {
     drawCollisionFlash();
     drawHUD();
     drawChonkHUD();
+    drawTouchControls();
 
   } else if (gameState === 'gameover') {
     drawLaserBeams();
@@ -2143,10 +2413,6 @@ function gameLoop(timestamp) {
     drawHUD();
     drawGameOver();
 
-  } else if (gameState === 'enterName') {
-    drawCat();
-    drawVacuums();
-    drawNameEntry();
   }
 
   requestAnimationFrame(gameLoop);
@@ -2155,5 +2421,6 @@ function gameLoop(timestamp) {
 // ============================================
 //  Start the engine!
 // ============================================
+resizeCanvas();
 createStars();
 requestAnimationFrame(gameLoop);
