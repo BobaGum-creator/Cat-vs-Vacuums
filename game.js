@@ -86,6 +86,118 @@ function isNewHighScore(finalScore) {
 loadHighScore();
 
 // ============================================
+//  Cat Skins — Color Unlock System
+// ============================================
+// Each skin has: name, body (primary), earInner/eye (accent),
+// belly (lighter), paws (darker), and the score needed to unlock.
+// 'rainbow' is special — body color cycles over time.
+var CAT_SKINS = [
+  { name: 'Gray',         body: '#8e99a4', accent: '#c8d0d8', belly: '#b8c2cc', paws: '#6b7580', score: 0 },
+  { name: 'Pink',         body: '#ff6b9d', accent: '#ffd93d', belly: '#ffb3d0', paws: '#e0558a', score: 250 },
+  { name: 'Bright Blue',  body: '#3dacf7', accent: '#a8e6ff', belly: '#8fd4ff', paws: '#2888d4', score: 500 },
+  { name: 'Lime Green',   body: '#7ed321', accent: '#d4ff70', belly: '#aee868', paws: '#5ea318', score: 750 },
+  { name: 'Purple',       body: '#9b59b6', accent: '#d7a8f0', belly: '#c49ddb', paws: '#7d3f99', score: 1000 },
+  { name: 'Yellow',       body: '#f5c542', accent: '#fff5b0', belly: '#fce588', paws: '#d4a620', score: 1500 },
+  { name: 'Tabby Orange', body: '#e8832a', accent: '#ffcc66', belly: '#f0a860', paws: '#c46a18', score: 2000 },
+  { name: 'Rainbow',      body: 'rainbow',  accent: '#ffffff', belly: 'rainbow', paws: 'rainbow', score: 3000 }
+];
+
+var SKINS_KEY = 'catVsVacuums_skins';
+var selectedSkinIndex = 0;
+var unlockedSkins = [true]; // gray is always unlocked; rest loaded from storage
+
+function loadSkins() {
+  try {
+    var data = localStorage.getItem(SKINS_KEY);
+    if (data) {
+      var parsed = JSON.parse(data);
+      unlockedSkins = parsed.unlocked || [true];
+      selectedSkinIndex = parsed.selected || 0;
+      // Ensure array is the right length
+      while (unlockedSkins.length < CAT_SKINS.length) unlockedSkins.push(false);
+    } else {
+      unlockedSkins = [];
+      for (var i = 0; i < CAT_SKINS.length; i++) unlockedSkins.push(i === 0);
+      selectedSkinIndex = 0;
+    }
+  } catch (e) {
+    unlockedSkins = [true];
+    selectedSkinIndex = 0;
+  }
+  // Validate selectedSkinIndex
+  if (selectedSkinIndex < 0 || selectedSkinIndex >= CAT_SKINS.length) selectedSkinIndex = 0;
+  if (!unlockedSkins[selectedSkinIndex]) selectedSkinIndex = 0;
+}
+
+function saveSkins() {
+  try {
+    localStorage.setItem(SKINS_KEY, JSON.stringify({
+      unlocked: unlockedSkins,
+      selected: selectedSkinIndex
+    }));
+  } catch (e) {}
+}
+
+// Called after each game — check if new skins should unlock
+function checkSkinUnlocks(finalScore) {
+  var newUnlock = false;
+  for (var i = 0; i < CAT_SKINS.length; i++) {
+    if (!unlockedSkins[i] && finalScore >= CAT_SKINS[i].score) {
+      unlockedSkins[i] = true;
+      newUnlock = true;
+    }
+  }
+  if (newUnlock) saveSkins();
+  return newUnlock;
+}
+
+// Get the current skin's colors (handles rainbow cycling)
+function getSkinColors() {
+  var skin = CAT_SKINS[selectedSkinIndex];
+  if (skin.body === 'rainbow') {
+    var t = Date.now() / 600;
+    var r = Math.floor(128 + 127 * Math.sin(t));
+    var g = Math.floor(128 + 127 * Math.sin(t + 2.094));
+    var b = Math.floor(128 + 127 * Math.sin(t + 4.189));
+    var bodyColor = 'rgb(' + r + ',' + g + ',' + b + ')';
+    // Lighter belly
+    var br = Math.min(255, r + 60);
+    var bg = Math.min(255, g + 60);
+    var bb = Math.min(255, b + 60);
+    var bellyColor = 'rgb(' + br + ',' + bg + ',' + bb + ')';
+    // Darker paws
+    var pr = Math.max(0, r - 40);
+    var pg = Math.max(0, g - 40);
+    var pb = Math.max(0, b - 40);
+    var pawColor = 'rgb(' + pr + ',' + pg + ',' + pb + ')';
+    return { body: bodyColor, accent: skin.accent, belly: bellyColor, paws: pawColor };
+  }
+  return { body: skin.body, accent: skin.accent, belly: skin.belly, paws: skin.paws };
+}
+
+// Cycle to next unlocked skin (direction: 1 or -1)
+function cycleSkin(direction) {
+  var start = selectedSkinIndex;
+  do {
+    selectedSkinIndex += direction;
+    if (selectedSkinIndex >= CAT_SKINS.length) selectedSkinIndex = 0;
+    if (selectedSkinIndex < 0) selectedSkinIndex = CAT_SKINS.length - 1;
+  } while (!unlockedSkins[selectedSkinIndex] && selectedSkinIndex !== start);
+  saveSkins();
+}
+
+// Count how many skins are unlocked
+function countUnlockedSkins() {
+  var count = 0;
+  for (var i = 0; i < unlockedSkins.length; i++) {
+    if (unlockedSkins[i]) count++;
+  }
+  return count;
+}
+
+loadSkins();
+
+// ============================================
 //  Sound Engine (Web Audio API)
 // ============================================
 let audioCtx = null;
@@ -343,6 +455,11 @@ document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 // Fullscreen button position (drawn on title screen)
 var fullscreenBtn = { x: 0, y: 0, w: 0, h: 0 };
 
+// Skin selector arrow hitboxes (title screen)
+var skinArrowLeft = { x: 0, y: 0, w: 0, h: 0 };
+var skinArrowRight = { x: 0, y: 0, w: 0, h: 0 };
+var newSkinUnlocked = false; // set true on game over if new skin was unlocked
+
 // ============================================
 //  Input Tracking
 // ============================================
@@ -356,6 +473,16 @@ window.addEventListener('keydown', function (e) {
   // Fullscreen toggle (F key) — works on any screen
   if (e.key === 'f' || e.key === 'F') {
     toggleFullscreen();
+    return;
+  }
+
+  // Title screen — arrow keys cycle skins
+  if (gameState === 'title' && e.key === 'ArrowLeft') {
+    cycleSkin(-1);
+    return;
+  }
+  if (gameState === 'title' && e.key === 'ArrowRight') {
+    cycleSkin(1);
     return;
   }
 
@@ -441,11 +568,24 @@ function handleTouchStart(e) {
 
     // Title screen
     if (gameState === 'title') {
-      // Check fullscreen button first
+      // Check fullscreen button
       if (gp.x >= fullscreenBtn.x && gp.x <= fullscreenBtn.x + fullscreenBtn.w &&
           gp.y >= fullscreenBtn.y && gp.y <= fullscreenBtn.y + fullscreenBtn.h) {
         toggleFullscreen();
         return;
+      }
+      // Check skin selector arrows
+      if (countUnlockedSkins() > 1) {
+        if (gp.x >= skinArrowLeft.x && gp.x <= skinArrowLeft.x + skinArrowLeft.w &&
+            gp.y >= skinArrowLeft.y && gp.y <= skinArrowLeft.y + skinArrowLeft.h) {
+          cycleSkin(-1);
+          return;
+        }
+        if (gp.x >= skinArrowRight.x && gp.x <= skinArrowRight.x + skinArrowRight.w &&
+            gp.y >= skinArrowRight.y && gp.y <= skinArrowRight.y + skinArrowRight.h) {
+          cycleSkin(1);
+          return;
+        }
       }
       sfxStart();
       startGame();
@@ -771,6 +911,8 @@ function drawCat() {
     if (Math.floor(invincibleTimer * invincibleFlashRate) % 2 === 0) return;
   }
 
+  var sc = getSkinColors(); // current skin colors
+
   var cx = cat.x;
   var cy = cat.y;
   var midX = cx + CAT_SIZE / 2;
@@ -787,7 +929,7 @@ function drawCat() {
 
   // Tail
   ctx.save();
-  ctx.strokeStyle = '#ff6b9d';
+  ctx.strokeStyle = sc.body;
   ctx.lineWidth = 4;
   ctx.lineCap = 'round';
   var tailSwing = Math.sin(cat.tailWag) * 8;
@@ -802,26 +944,26 @@ function drawCat() {
 
   // Ears (stay on top, scale slightly with chonk)
   var earSpread = 14 + chonkLevel * 2;
-  ctx.fillStyle = '#ff6b9d';
+  ctx.fillStyle = sc.body;
   ctx.beginPath();
   ctx.moveTo(midX - earSpread, cy); ctx.lineTo(midX - earSpread - 6, cy - 14); ctx.lineTo(midX - earSpread + 8, cy - 4);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#ffd93d';
+  ctx.fillStyle = sc.accent;
   ctx.beginPath();
   ctx.moveTo(midX - earSpread, cy + 1); ctx.lineTo(midX - earSpread - 4, cy - 10); ctx.lineTo(midX - earSpread + 5, cy - 2);
   ctx.closePath(); ctx.fill();
 
-  ctx.fillStyle = '#ff6b9d';
+  ctx.fillStyle = sc.body;
   ctx.beginPath();
   ctx.moveTo(midX + earSpread, cy); ctx.lineTo(midX + earSpread + 6, cy - 14); ctx.lineTo(midX + earSpread - 8, cy - 4);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#ffd93d';
+  ctx.fillStyle = sc.accent;
   ctx.beginPath();
   ctx.moveTo(midX + earSpread, cy + 1); ctx.lineTo(midX + earSpread + 4, cy - 10); ctx.lineTo(midX + earSpread - 5, cy - 2);
   ctx.closePath(); ctx.fill();
 
   // Body — gets rounder with each burger
-  ctx.fillStyle = '#ff6b9d';
+  ctx.fillStyle = sc.body;
   // If fully chonked, draw as a circle for max roundness
   if (chonkLevel >= 4) {
     var circR = Math.max(bodyW, bodyH) / 2;
@@ -864,7 +1006,7 @@ function drawCat() {
   }
 
   // Belly highlight (scales with body)
-  ctx.fillStyle = '#ffb3d0';
+  ctx.fillStyle = sc.belly;
   var bellyW = (bodyW - 20) * 0.6;
   var bellyH = 16 + chonkLevel * 3;
   roundRect(midX - bellyW / 2, bodyY + bodyH * 0.45, bellyW, bellyH, 5);
@@ -887,14 +1029,14 @@ function drawCat() {
     ctx.shadowBlur = 0;
   } else {
     // Normal eyes
-    ctx.fillStyle = '#ffd93d';
+    ctx.fillStyle = sc.accent;
     ctx.beginPath(); ctx.arc(midX - eyeSpread, eyeY, 6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#1a1a1a';
     ctx.beginPath(); ctx.arc(midX - eyeSpread, eyeY + 1, 3.5, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.beginPath(); ctx.arc(midX - eyeSpread + 2, eyeY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
 
-    ctx.fillStyle = '#ffd93d';
+    ctx.fillStyle = sc.accent;
     ctx.beginPath(); ctx.arc(midX + eyeSpread, eyeY, 6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#1a1a1a';
     ctx.beginPath(); ctx.arc(midX + eyeSpread, eyeY + 1, 3.5, 0, Math.PI * 2); ctx.fill();
@@ -904,7 +1046,7 @@ function drawCat() {
 
   // Nose
   var noseY = bodyY + bodyH * 0.5;
-  ctx.fillStyle = '#ff6b9d';
+  ctx.fillStyle = sc.body;
   ctx.beginPath();
   ctx.moveTo(midX - 2, noseY); ctx.lineTo(midX + 2, noseY); ctx.lineTo(midX, noseY + 2);
   ctx.closePath(); ctx.fill();
@@ -919,7 +1061,7 @@ function drawCat() {
   ctx.beginPath(); ctx.moveTo(midX + 12, whiskY + 2); ctx.lineTo(midX + 24 + chonkLevel * 2, whiskY + 3); ctx.stroke();
 
   // Paws (at bottom of expanded body)
-  ctx.fillStyle = '#e0558a';
+  ctx.fillStyle = sc.paws;
   ctx.beginPath(); ctx.arc(bodyX + 8, bodyY + bodyH, 4, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc(bodyX + bodyW - 8, bodyY + bodyH, 4, 0, Math.PI * 2); ctx.fill();
 }
@@ -2065,7 +2207,7 @@ function drawHUD() {
 
   // Lives — draw cat face icons
   ctx.shadowBlur = 0;
-  ctx.fillStyle = '#ff6b9d';
+  ctx.fillStyle = getSkinColors().body;
   ctx.font = sf(8);
   ctx.textAlign = 'right';
   ctx.fillText('LIVES', W - 12, 20);
@@ -2088,7 +2230,8 @@ function drawHUD() {
 
 function drawMiniCatFace(x, y) {
   // Tiny 12x10 cat face
-  ctx.fillStyle = '#ff6b9d';
+  var msc = getSkinColors();
+  ctx.fillStyle = msc.body;
   ctx.fillRect(x, y, 12, 10);
   // Ears
   ctx.beginPath();
@@ -2098,7 +2241,7 @@ function drawMiniCatFace(x, y) {
   ctx.moveTo(x + 8, y); ctx.lineTo(x + 13, y - 4); ctx.lineTo(x + 11, y);
   ctx.closePath(); ctx.fill();
   // Eyes
-  ctx.fillStyle = '#ffd93d';
+  ctx.fillStyle = msc.accent;
   ctx.fillRect(x + 2, y + 3, 3, 3);
   ctx.fillRect(x + 7, y + 3, 3, 3);
   ctx.fillStyle = '#1a1a1a';
@@ -2128,6 +2271,54 @@ function drawTitleScreen() {
   invincibleTimer = 0; // ensure cat is visible
   drawCat();
   cat.x = savedX; cat.y = savedY; cat.tailWag = savedWag;
+
+  // Skin selector arrows (only show if more than 1 skin unlocked)
+  if (countUnlockedSkins() > 1) {
+    var arrowY = titleCatY + CAT_SIZE / 2; // vertically centered on cat
+    var hitSize = 40; // bigger hitbox for easy tapping
+
+    // Left arrow
+    var leftArrowX = titleCatX - 45;
+    skinArrowLeft.x = leftArrowX - hitSize / 2;
+    skinArrowLeft.y = arrowY - hitSize / 2;
+    skinArrowLeft.w = hitSize;
+    skinArrowLeft.h = hitSize;
+
+    ctx.fillStyle = '#45fffc';
+    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(Date.now() / 400);
+    ctx.beginPath();
+    ctx.moveTo(leftArrowX + 6, arrowY - 10);
+    ctx.lineTo(leftArrowX - 8, arrowY);
+    ctx.lineTo(leftArrowX + 6, arrowY + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Right arrow
+    var rightArrowX = titleCatX + CAT_SIZE + 45;
+    skinArrowRight.x = rightArrowX - hitSize / 2;
+    skinArrowRight.y = arrowY - hitSize / 2;
+    skinArrowRight.w = hitSize;
+    skinArrowRight.h = hitSize;
+
+    ctx.fillStyle = '#45fffc';
+    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(Date.now() / 400);
+    ctx.beginPath();
+    ctx.moveTo(rightArrowX - 6, arrowY - 10);
+    ctx.lineTo(rightArrowX + 8, arrowY);
+    ctx.lineTo(rightArrowX - 6, arrowY + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Skin name below cat
+    ctx.fillStyle = '#ffffff';
+    ctx.font = sf(6);
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.8;
+    ctx.fillText(CAT_SKINS[selectedSkinIndex].name, W / 2, titleCatY + CAT_SIZE + 16);
+    ctx.globalAlpha = 1;
+  }
 
   // Title text
   ctx.fillStyle = '#ffda45';
@@ -2260,6 +2451,18 @@ function drawGameOver() {
     ctx.fillText('BEST: ' + savedHighScore, W / 2, H / 2 + 80);
   }
 
+  // New skin unlocked notification
+  if (newSkinUnlocked) {
+    if (Math.floor(Date.now() / 400) % 2 === 0) {
+      ctx.fillStyle = '#00FF41';
+      ctx.font = sf(8);
+      ctx.shadowColor = '#00FF41';
+      ctx.shadowBlur = 10;
+      ctx.fillText('NEW SKIN UNLOCKED!', W / 2, H / 2 + 100);
+      ctx.shadowBlur = 0;
+    }
+  }
+
   // Restart hint
   ctx.fillStyle = '#00ff88';
   ctx.font = sf(8);
@@ -2279,6 +2482,7 @@ function drawGameOver() {
 
 function startGame() {
   gameState = 'playing';
+  newSkinUnlocked = false;
   score = 0;
   bonusScore = 0;
   lives = MAX_LIVES;
@@ -2312,9 +2516,10 @@ function triggerGameOver() {
   if (gameState !== 'playing') return;
   gameState = 'gameover';
 
-  // Save high score
+  // Save high score and check skin unlocks
   var finalScore = Math.floor(score) + bonusScore;
   saveHighScore(finalScore);
+  newSkinUnlocked = checkSkinUnlocks(finalScore);
 
   sfxGameOver();
 
