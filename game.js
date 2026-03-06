@@ -1,5 +1,5 @@
 // ============================================
-//  Cat vs Vacuums — Dodge Game Engine v2.0
+//  Fatty Catty — Dodge Game Engine v2.0
 //  Features: Title screen, 9 lives, collectibles,
 //  waves, high score, sound, touch, rainbow hiss
 // ============================================
@@ -152,8 +152,15 @@ function checkSkinUnlocks(finalScore) {
 }
 
 // Get the current skin's colors (handles rainbow cycling)
-function getSkinColors() {
-  var skin = CAT_SKINS[selectedSkinIndex];
+// If forceReal is true, return actual colors even for locked skins (used during gameplay)
+function getSkinColors(forceReal) {
+  var idx = forceReal ? selectedSkinIndex : selectedSkinIndex;
+  // During gameplay, always use real colors (player can only play with unlocked skins)
+  // On title screen preview, locked skins show as dark silhouettes
+  if (!forceReal && !unlockedSkins[idx]) {
+    return { body: '#1a1a2e', accent: '#2a2a3e', belly: '#222236', paws: '#141428' };
+  }
+  var skin = CAT_SKINS[idx];
   if (skin.body === 'rainbow') {
     var t = Date.now() / 600;
     var r = Math.floor(128 + 127 * Math.sin(t));
@@ -177,13 +184,11 @@ function getSkinColors() {
 
 // Cycle to next unlocked skin (direction: 1 or -1)
 function cycleSkin(direction) {
-  var start = selectedSkinIndex;
-  do {
-    selectedSkinIndex += direction;
-    if (selectedSkinIndex >= CAT_SKINS.length) selectedSkinIndex = 0;
-    if (selectedSkinIndex < 0) selectedSkinIndex = CAT_SKINS.length - 1;
-  } while (!unlockedSkins[selectedSkinIndex] && selectedSkinIndex !== start);
-  saveSkins();
+  selectedSkinIndex += direction;
+  if (selectedSkinIndex >= CAT_SKINS.length) selectedSkinIndex = 0;
+  if (selectedSkinIndex < 0) selectedSkinIndex = CAT_SKINS.length - 1;
+  // Only save if unlocked (locked skins are preview only)
+  if (unlockedSkins[selectedSkinIndex]) saveSkins();
 }
 
 // Count how many skins are unlocked
@@ -459,6 +464,7 @@ var fullscreenBtn = { x: 0, y: 0, w: 0, h: 0 };
 var skinArrowLeft = { x: 0, y: 0, w: 0, h: 0 };
 var skinArrowRight = { x: 0, y: 0, w: 0, h: 0 };
 var newSkinUnlocked = false; // set true on game over if new skin was unlocked
+var titleScreenMode = false; // suppresses chonk glow ring on title screen
 
 // ============================================
 //  Input Tracking
@@ -568,14 +574,8 @@ function handleTouchStart(e) {
 
     // Title screen
     if (gameState === 'title') {
-      // Check fullscreen button
-      if (gp.x >= fullscreenBtn.x && gp.x <= fullscreenBtn.x + fullscreenBtn.w &&
-          gp.y >= fullscreenBtn.y && gp.y <= fullscreenBtn.y + fullscreenBtn.h) {
-        toggleFullscreen();
-        return;
-      }
       // Check skin selector arrows
-      if (countUnlockedSkins() > 1) {
+      if (CAT_SKINS.length > 1) {
         if (gp.x >= skinArrowLeft.x && gp.x <= skinArrowLeft.x + skinArrowLeft.w &&
             gp.y >= skinArrowLeft.y && gp.y <= skinArrowLeft.y + skinArrowLeft.h) {
           cycleSkin(-1);
@@ -974,8 +974,8 @@ function drawCat() {
     roundRect(bodyX, bodyY, bodyW, bodyH, bodyR);
   }
 
-  // Chonk glow — pulsing outline when chonking up
-  if (chonkLevel > 0 && !megaChonkActive) {
+  // Chonk glow — pulsing outline when chonking up (not on title screen)
+  if (chonkLevel > 0 && !megaChonkActive && !titleScreenMode) {
     ctx.save();
     var glowColors = ['#FFD700', '#FF8C00', '#FF4500', '#FF0000'];
     ctx.strokeStyle = glowColors[Math.min(chonkLevel - 1, 3)];
@@ -1029,19 +1029,24 @@ function drawCat() {
     ctx.shadowBlur = 0;
   } else {
     // Normal eyes
+    var isLocked = !unlockedSkins[selectedSkinIndex];
     ctx.fillStyle = sc.accent;
     ctx.beginPath(); ctx.arc(midX - eyeSpread, eyeY, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#1a1a1a';
+    ctx.fillStyle = isLocked ? sc.body : '#1a1a1a';
     ctx.beginPath(); ctx.arc(midX - eyeSpread, eyeY + 1, 3.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(midX - eyeSpread + 2, eyeY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+    if (!isLocked) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(midX - eyeSpread + 2, eyeY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
 
     ctx.fillStyle = sc.accent;
     ctx.beginPath(); ctx.arc(midX + eyeSpread, eyeY, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#1a1a1a';
+    ctx.fillStyle = isLocked ? sc.body : '#1a1a1a';
     ctx.beginPath(); ctx.arc(midX + eyeSpread, eyeY + 1, 3.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(midX + eyeSpread + 2, eyeY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+    if (!isLocked) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(midX + eyeSpread + 2, eyeY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
   // Nose
@@ -1053,7 +1058,7 @@ function drawCat() {
 
   // Whiskers
   var whiskY = noseY;
-  ctx.strokeStyle = '#ffffff';
+  ctx.strokeStyle = sc.accent;
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(midX - 12, whiskY); ctx.lineTo(midX - 24 - chonkLevel * 2, whiskY - 3); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(midX - 12, whiskY + 2); ctx.lineTo(midX - 24 - chonkLevel * 2, whiskY + 3); ctx.stroke();
@@ -1261,6 +1266,17 @@ function updateCollectibles(dt) {
     var c = collectibles[i];
     c.y += c.speed * dt;
     c.wobble += dt * 3;
+
+    // Magnet pull — attract toward cat
+    if (magnetActive) {
+      var mdx = (cat.x + CAT_SIZE / 2) - (c.x + COLLECT_SIZE / 2);
+      var mdy = (cat.y + CAT_SIZE / 2) - (c.y + COLLECT_SIZE / 2);
+      var mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (mdist > 0 && mdist < 200) {
+        c.x += (mdx / mdist) * MAGNET_PULL_SPEED * dt;
+        c.y += (mdy / mdist) * MAGNET_PULL_SPEED * dt;
+      }
+    }
 
     // Check collision with cat
     if (checkAABBCollision(cat, c)) {
@@ -1508,6 +1524,309 @@ function resetCollectibles() {
 }
 
 // ============================================
+//  Power-Ups (Bubble Shield & Magnet)
+// ============================================
+const POWERUP_SIZE = 32; // larger than food (24)
+const POWERUP_SPEED = 70; // falls slower than food
+const POWERUP_SPAWN_INTERVAL = 11; // seconds between power-up spawns
+let powerupSpawnTimer = 0;
+const powerups = [];
+
+// Bubble Shield state
+var bubbleShieldActive = false;
+
+// Magnet state
+var magnetActive = false;
+var magnetTimer = 0;
+const MAGNET_DURATION = 8; // seconds
+const MAGNET_PULL_SPEED = 350; // how fast items get pulled toward cat
+
+// Power-up sound effects
+function sfxBubbleCollect() {
+  playTone(600, 0.1, 'sine', 0.1);
+  playTone(900, 0.1, 'sine', 0.08, 0.08);
+  playTone(1200, 0.15, 'sine', 0.06, 0.15);
+  // Bubbly pop
+  playTone(1500, 0.05, 'sine', 0.05, 0.25);
+}
+
+function sfxBubblePop() {
+  playNoise(0.08, 0.12);
+  playTone(800, 0.06, 'sine', 0.08);
+  playTone(400, 0.08, 'sine', 0.06, 0.04);
+}
+
+function sfxMagnetCollect() {
+  // Metallic ascending chime
+  playTone(440, 0.08, 'square', 0.08);
+  playTone(660, 0.08, 'square', 0.08, 0.06);
+  playTone(880, 0.08, 'square', 0.08, 0.12);
+  playTone(1100, 0.12, 'square', 0.06, 0.18);
+}
+
+function spawnPowerup() {
+  var type = Math.random() < 0.5 ? 'bubble' : 'magnet';
+  // Don't spawn bubble if shield already active
+  if (type === 'bubble' && bubbleShieldActive) type = 'magnet';
+  // Don't spawn magnet if already active
+  if (type === 'magnet' && magnetActive) type = 'bubble';
+  // If both active, skip spawn
+  if (bubbleShieldActive && magnetActive) return;
+
+  powerups.push({
+    x: Math.random() * (W - POWERUP_SIZE),
+    y: -POWERUP_SIZE,
+    w: POWERUP_SIZE,
+    h: POWERUP_SIZE,
+    type: type,
+    wobble: Math.random() * Math.PI * 2,
+    spin: 0,
+    speed: POWERUP_SPEED + Math.random() * 20,
+  });
+}
+
+function updatePowerups(dt) {
+  // Spawn timer
+  powerupSpawnTimer += dt;
+  if (powerupSpawnTimer >= POWERUP_SPAWN_INTERVAL) {
+    powerupSpawnTimer -= POWERUP_SPAWN_INTERVAL;
+    spawnPowerup();
+  }
+
+  // Update magnet timer
+  if (magnetActive) {
+    magnetTimer -= dt;
+    if (magnetTimer <= 0) {
+      magnetActive = false;
+      magnetTimer = 0;
+    }
+  }
+
+  // Update power-up positions and check collection
+  for (var i = powerups.length - 1; i >= 0; i--) {
+    var p = powerups[i];
+    p.y += p.speed * dt;
+    p.wobble += dt * 3;
+    p.spin += dt * 2;
+
+    // Magnet pulls power-ups too
+    if (magnetActive) {
+      var pdx = (cat.x + CAT_SIZE / 2) - (p.x + POWERUP_SIZE / 2);
+      var pdy = (cat.y + CAT_SIZE / 2) - (p.y + POWERUP_SIZE / 2);
+      var pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+      if (pdist > 0 && pdist < 200) {
+        p.x += (pdx / pdist) * MAGNET_PULL_SPEED * dt * 0.5;
+        p.y += (pdy / pdist) * MAGNET_PULL_SPEED * dt * 0.5;
+      }
+    }
+
+    // Check collision with cat
+    if (checkAABBCollision(cat, p)) {
+      if (p.type === 'bubble') {
+        sfxBubbleCollect();
+        bubbleShieldActive = true;
+        scorePopups.push({
+          x: p.x + POWERUP_SIZE / 2,
+          y: p.y,
+          text: 'SHIELD!',
+          life: 1.5,
+          color: '#00BFFF',
+        });
+      } else if (p.type === 'magnet') {
+        sfxMagnetCollect();
+        magnetActive = true;
+        magnetTimer = MAGNET_DURATION;
+        scorePopups.push({
+          x: p.x + POWERUP_SIZE / 2,
+          y: p.y,
+          text: 'MAGNET!',
+          life: 1.5,
+          color: '#FF4444',
+        });
+      }
+      powerups.splice(i, 1);
+      continue;
+    }
+
+    // Off screen
+    if (p.y > H + 10) {
+      powerups.splice(i, 1);
+    }
+  }
+}
+
+function drawBubblePowerup(x, y, size, wobble, spin) {
+  ctx.save();
+  var cx = x + size / 2;
+  var cy = y + size / 2;
+  var r = size / 2 - 2;
+  var pulse = 1 + Math.sin(wobble * 2) * 0.08;
+  r *= pulse;
+
+  // Glow
+  ctx.shadowColor = '#00BFFF';
+  ctx.shadowBlur = 8 + Math.sin(wobble) * 4;
+
+  // Outer bubble
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0, 191, 255, 0.7)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Fill with translucent
+  ctx.fillStyle = 'rgba(0, 191, 255, 0.15)';
+  ctx.fill();
+
+  // Shine highlight
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.25, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.fill();
+
+  // Second smaller highlight
+  ctx.beginPath();
+  ctx.arc(cx + r * 0.2, cy - r * 0.15, r * 0.1, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawMagnetPowerup(x, y, size, wobble, spin) {
+  ctx.save();
+  var cx = x + size / 2;
+  var cy = y + size / 2;
+  var pulse = 1 + Math.sin(wobble * 2) * 0.06;
+
+  // Glow
+  ctx.shadowColor = '#FF4444';
+  ctx.shadowBlur = 6 + Math.sin(wobble) * 3;
+
+  ctx.translate(cx, cy);
+  ctx.scale(pulse, pulse);
+
+  // Horseshoe magnet shape — U shape
+  var mw = size * 0.4;  // half width of magnet
+  var mh = size * 0.4;  // height of the curve
+  var legH = size * 0.25; // leg height
+
+  // Red side (left leg)
+  ctx.fillStyle = '#FF3333';
+  ctx.fillRect(-mw - 3, -mh + 2, 7, mh + legH);
+  // Blue side (right leg)
+  ctx.fillStyle = '#3366FF';
+  ctx.fillRect(mw - 4, -mh + 2, 7, mh + legH);
+
+  // Curved top (connecting the legs) — use arc
+  ctx.beginPath();
+  ctx.arc(0, -mh + 4, mw + 0.5, Math.PI, 0, false);
+  ctx.lineWidth = 7;
+  // Gradient effect: left half red, right half blue
+  ctx.strokeStyle = '#CC2222';
+  ctx.stroke();
+
+  // Tips (silver/metallic ends)
+  ctx.fillStyle = '#C0C0C0';
+  ctx.fillRect(-mw - 4, legH, 9, 5);
+  ctx.fillRect(mw - 5, legH, 9, 5);
+
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawPowerups() {
+  powerups.forEach(function (p) {
+    // Blinking glow effect (makes them stand out from food)
+    var blink = 0.7 + 0.3 * Math.sin(p.wobble * 4);
+    ctx.globalAlpha = blink;
+    if (p.type === 'bubble') {
+      drawBubblePowerup(p.x, p.y, POWERUP_SIZE, p.wobble, p.spin);
+    } else if (p.type === 'magnet') {
+      drawMagnetPowerup(p.x, p.y, POWERUP_SIZE, p.wobble, p.spin);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+// Draw bubble shield around cat when active
+function drawBubbleShield() {
+  if (!bubbleShieldActive) return;
+  ctx.save();
+  var cx = cat.x + CAT_SIZE / 2;
+  var cy = cat.y + CAT_SIZE / 2;
+  var chonkScale = 1 + chonkLevel * 0.15;
+  var shieldR = CAT_SIZE * chonkScale * 0.7 + 8;
+  var t = Date.now() / 300;
+
+  // Outer ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, shieldR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0, 191, 255, ' + (0.4 + 0.2 * Math.sin(t)) + ')';
+  ctx.lineWidth = 2.5;
+  ctx.shadowColor = '#00BFFF';
+  ctx.shadowBlur = 10 + Math.sin(t * 2) * 5;
+  ctx.stroke();
+
+  // Inner fill
+  ctx.fillStyle = 'rgba(0, 191, 255, 0.06)';
+  ctx.fill();
+
+  // Shine
+  ctx.beginPath();
+  var shineAngle = t * 0.5;
+  ctx.arc(cx + Math.cos(shineAngle) * shieldR * 0.4,
+          cy + Math.sin(shineAngle) * shieldR * 0.4,
+          3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// Draw magnet pull lines when active
+function drawMagnetEffect() {
+  if (!magnetActive) return;
+  ctx.save();
+  var cx = cat.x + CAT_SIZE / 2;
+  var cy = cat.y + CAT_SIZE / 2;
+  var t = Date.now() / 200;
+
+  // Pulsing pull radius indicator
+  ctx.beginPath();
+  ctx.arc(cx, cy, 200, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255, 68, 68, ' + (0.08 + 0.04 * Math.sin(t)) + ')';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Draw pull lines to nearby collectibles
+  collectibles.forEach(function (c) {
+    var dx = cx - (c.x + COLLECT_SIZE / 2);
+    var dy = cy - (c.y + COLLECT_SIZE / 2);
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 200) {
+      ctx.beginPath();
+      ctx.moveTo(c.x + COLLECT_SIZE / 2, c.y + COLLECT_SIZE / 2);
+      ctx.lineTo(cx, cy);
+      ctx.strokeStyle = 'rgba(255, 68, 68, ' + (0.15 * (1 - dist / 200)) + ')';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  });
+
+  ctx.restore();
+}
+
+function resetPowerups() {
+  powerups.length = 0;
+  powerupSpawnTimer = 0;
+  bubbleShieldActive = false;
+  magnetActive = false;
+  magnetTimer = 0;
+}
+
+// ============================================
 //  Collision Detection (AABB)
 // ============================================
 const COLLISION_PADDING = 4;
@@ -1530,6 +1849,21 @@ function checkAllCollisions() {
 
   for (var i = 0; i < vacuums.length; i++) {
     if (checkAABBCollision(cat, vacuums[i])) {
+      // Bubble shield absorbs the hit!
+      if (bubbleShieldActive) {
+        bubbleShieldActive = false;
+        sfxBubblePop();
+        vacuums.splice(i, 1);
+        invincibleTimer = 0.5; // brief invincibility after pop
+        scorePopups.push({
+          x: cat.x + CAT_SIZE / 2,
+          y: cat.y,
+          text: 'POP!',
+          life: 1.0,
+          color: '#00BFFF',
+        });
+        return;
+      }
       lives--;
       sfxHit();
       sfxAngryCatMeow();
@@ -2160,6 +2494,18 @@ function drawChonkHUD() {
   }
 }
 
+function drawMagnetHUD() {
+  if (!magnetActive) return;
+  ctx.save();
+  ctx.fillStyle = '#FF4444';
+  ctx.font = sf(7);
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 0.9;
+  var timeLeft = Math.ceil(magnetTimer);
+  ctx.fillText('MAGNET ' + timeLeft + 's', 12, H - 52);
+  ctx.restore();
+}
+
 function resetChonk() {
   chonkBurgers = 0;
   chonkLevel = 0;
@@ -2263,22 +2609,27 @@ function drawTitleScreen() {
   var titleCatX = W / 2 - CAT_SIZE / 2;
   var titleCatY = H / 2 - 60 + Math.sin(titleBounce) * 8;
 
-  // Temporarily move cat to draw it
+  // Temporarily move cat to draw it — max chonk for the Fatty Catty look!
   var savedX = cat.x, savedY = cat.y, savedWag = cat.tailWag;
+  var savedChonk = chonkLevel;
   cat.x = titleCatX;
   cat.y = titleCatY;
   cat.tailWag = titleBounce * 4;
+  chonkLevel = 4; // max fat!
+  titleScreenMode = true;
   invincibleTimer = 0; // ensure cat is visible
   drawCat();
   cat.x = savedX; cat.y = savedY; cat.tailWag = savedWag;
+  chonkLevel = savedChonk;
+  titleScreenMode = false;
 
   // Skin selector arrows (only show if more than 1 skin unlocked)
-  if (countUnlockedSkins() > 1) {
+  if (CAT_SKINS.length > 1) {
     var arrowY = titleCatY + CAT_SIZE / 2; // vertically centered on cat
     var hitSize = 40; // bigger hitbox for easy tapping
 
     // Left arrow
-    var leftArrowX = titleCatX - 45;
+    var leftArrowX = titleCatX - 55;
     skinArrowLeft.x = leftArrowX - hitSize / 2;
     skinArrowLeft.y = arrowY - hitSize / 2;
     skinArrowLeft.w = hitSize;
@@ -2295,7 +2646,7 @@ function drawTitleScreen() {
     ctx.globalAlpha = 1;
 
     // Right arrow
-    var rightArrowX = titleCatX + CAT_SIZE + 45;
+    var rightArrowX = titleCatX + CAT_SIZE + 55;
     skinArrowRight.x = rightArrowX - hitSize / 2;
     skinArrowRight.y = arrowY - hitSize / 2;
     skinArrowRight.w = hitSize;
@@ -2311,12 +2662,17 @@ function drawTitleScreen() {
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    // Skin name below cat
-    ctx.fillStyle = '#ffffff';
+    // Skin label below cat — name if unlocked, points needed if locked
     ctx.font = sf(6);
     ctx.textAlign = 'center';
     ctx.globalAlpha = 0.8;
-    ctx.fillText(CAT_SKINS[selectedSkinIndex].name, W / 2, titleCatY + CAT_SIZE + 16);
+    if (unlockedSkins[selectedSkinIndex]) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(CAT_SKINS[selectedSkinIndex].name, W / 2, titleCatY + CAT_SIZE + 24);
+    } else {
+      ctx.fillStyle = '#ff6b6b';
+      ctx.fillText(CAT_SKINS[selectedSkinIndex].score + ' pts to unlock', W / 2, titleCatY + CAT_SIZE + 24);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2326,8 +2682,8 @@ function drawTitleScreen() {
   ctx.textAlign = 'center';
   ctx.shadowColor = '#ff6bef';
   ctx.shadowBlur = 20;
-  ctx.fillText('CAT vs', W / 2, H / 2 - 120);
-  ctx.fillText('VACUUMS', W / 2, H / 2 - 92);
+  ctx.fillText('FATTY', W / 2, H / 2 - 120);
+  ctx.fillText('CATTY', W / 2, H / 2 - 92);
   ctx.shadowBlur = 0;
 
   // Start prompt (blinking)
@@ -2363,27 +2719,14 @@ function drawTitleScreen() {
     ctx.shadowBlur = 0;
   }
 
-  // Fullscreen button
-  ctx.globalAlpha = 0.8;
-  var fsBtnW = 180;
-  var fsBtnH = 30;
-  var fsBtnX = W / 2 - fsBtnW / 2;
-  var fsBtnY = H - 60;
-  fullscreenBtn.x = fsBtnX;
-  fullscreenBtn.y = fsBtnY;
-  fullscreenBtn.w = fsBtnW;
-  fullscreenBtn.h = fsBtnH;
-
-  ctx.strokeStyle = '#45fffc';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(fsBtnX, fsBtnY, fsBtnW, fsBtnH);
-  ctx.fillStyle = 'rgba(69, 255, 252, 0.1)';
-  ctx.fillRect(fsBtnX, fsBtnY, fsBtnW, fsBtnH);
-
-  ctx.fillStyle = '#45fffc';
-  ctx.font = sf(7);
-  ctx.fillText(isFullscreen ? '[ EXIT FULLSCREEN ]' : '[ FULLSCREEN ]', W / 2, fsBtnY + 20);
-  ctx.globalAlpha = 1;
+  // PWA install hint (only show if not already in standalone mode)
+  if (!window.matchMedia('(display-mode: standalone)').matches && !navigator.standalone) {
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#45fffc';
+    ctx.font = sf(5);
+    ctx.fillText('Add to Home Screen for fullscreen!', W / 2, H - 30);
+    ctx.globalAlpha = 1;
+  }
 
   ctx.restore();
 }
@@ -2481,6 +2824,11 @@ function drawGameOver() {
 // ============================================
 
 function startGame() {
+  // If currently previewing a locked skin, snap to nearest unlocked
+  if (!unlockedSkins[selectedSkinIndex]) {
+    selectedSkinIndex = 0; // gray is always unlocked
+    saveSkins();
+  }
   gameState = 'playing';
   newSkinUnlocked = false;
   score = 0;
@@ -2494,6 +2842,7 @@ function startGame() {
   resetCollectibles();
   resetWaves();
   resetChonk();
+  resetPowerups();
 }
 
 function restartGame() {
@@ -2508,6 +2857,7 @@ function restartGame() {
   resetHissBlast();
   resetCollectibles();
   resetChonk();
+  resetPowerups();
   currentWave = 0;
   waveAnnouncementTimer = 0;
 }
@@ -2582,6 +2932,8 @@ function gameLoop(timestamp) {
     updateCollectibles(dt);
     drawCollectibles();
 
+    updatePowerups(dt);
+
     checkAllCollisions();
 
     updateHissBlast(dt);
@@ -2596,6 +2948,10 @@ function gameLoop(timestamp) {
     drawCollisionFlash();
     drawHUD();
     drawChonkHUD();
+    drawMagnetHUD();
+    drawPowerups();
+    drawBubbleShield();
+    drawMagnetEffect();
     drawTouchControls();
 
   } else if (gameState === 'gameover') {
