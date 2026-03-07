@@ -16,7 +16,7 @@ let W = GAME_W;
 let H = GAME_H;
 
 // Font scale — makes text readable on all screens
-var FSCALE = 1.15;
+var FSCALE = 1.35;
 
 // ============================================
 //  Game State Management
@@ -99,6 +99,7 @@ var CAT_SKINS = [
   { name: 'Purple',       body: '#9b59b6', accent: '#d7a8f0', belly: '#c49ddb', paws: '#7d3f99', score: 1000 },
   { name: 'Yellow',       body: '#f5c542', accent: '#fff5b0', belly: '#fce588', paws: '#d4a620', score: 1500 },
   { name: 'Tabby Orange', body: '#e8832a', accent: '#ffcc66', belly: '#f0a860', paws: '#c46a18', score: 2000 },
+  { name: 'Galaxy',       body: 'galaxy',   accent: '#e0d0ff', belly: 'galaxy',  paws: 'galaxy',  score: 2500 },
   { name: 'Rainbow',      body: 'rainbow',  accent: '#ffffff', belly: 'rainbow', paws: 'rainbow', score: 3000 }
 ];
 
@@ -178,6 +179,25 @@ function getSkinColors(forceReal) {
     var pb = Math.max(0, b - 40);
     var pawColor = 'rgb(' + pr + ',' + pg + ',' + pb + ')';
     return { body: bodyColor, accent: skin.accent, belly: bellyColor, paws: pawColor };
+  }
+  if (skin.body === 'galaxy') {
+    // Cosmic shimmer — brighter purples, violets, and teals
+    var gt = Date.now() / 1200;
+    var gr = Math.floor(100 + 60 * Math.sin(gt));
+    var gg = Math.floor(60 + 50 * Math.sin(gt + 1.5));
+    var gb = Math.floor(170 + 60 * Math.sin(gt + 3.0));
+    var galaxyBody = 'rgb(' + gr + ',' + gg + ',' + gb + ')';
+    // Belly — lighter, more lavender
+    var gbr = Math.min(255, gr + 50);
+    var gbg = Math.min(255, gg + 40);
+    var gbb = Math.min(255, gb + 40);
+    var galaxyBelly = 'rgb(' + gbr + ',' + gbg + ',' + gbb + ')';
+    // Paws — slightly darker
+    var gpr = Math.max(0, gr - 25);
+    var gpg = Math.max(0, gg - 15);
+    var gpb = Math.max(0, gb - 20);
+    var galaxyPaws = 'rgb(' + gpr + ',' + gpg + ',' + gpb + ')';
+    return { body: galaxyBody, accent: skin.accent, belly: galaxyBelly, paws: galaxyPaws };
   }
   return { body: skin.body, accent: skin.accent, belly: skin.belly, paws: skin.paws };
 }
@@ -927,6 +947,32 @@ function drawCat() {
   var bodyX = midX - bodyW / 2;
   var bodyY = cy + (CAT_SIZE - bodyH) / 2; // center vertically
 
+  // Chonk aura — drawn first so it sits behind everything (hidden on title screen)
+  if (chonkLevel > 0 && !megaChonkActive && !titleScreenMode) {
+    var rgbaAuraColors = [
+      'rgba(255,215,0,',
+      'rgba(255,140,0,',
+      'rgba(255,69,0,',
+      'rgba(255,0,0,'
+    ];
+    var innerAlpha = 0.10 + chonkLevel * 0.07;
+    var auraPulse = 1 + Math.sin(Date.now() / 250) * 0.08;
+    var innerR = Math.max(bodyW, bodyH) / 2;
+    var outerR = innerR * (2.2 + chonkLevel * 0.2) * auraPulse;
+    var auraY = bodyY + bodyH / 2;
+    var colorBase = rgbaAuraColors[Math.min(chonkLevel - 1, 3)];
+
+    ctx.save();
+    var auraGrad = ctx.createRadialGradient(midX, auraY, innerR * 0.5, midX, auraY, outerR);
+    auraGrad.addColorStop(0, colorBase + innerAlpha + ')');
+    auraGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = auraGrad;
+    ctx.beginPath();
+    ctx.arc(midX, auraY, outerR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Tail
   ctx.save();
   ctx.strokeStyle = sc.body;
@@ -972,37 +1018,6 @@ function drawCat() {
     ctx.fill();
   } else {
     roundRect(bodyX, bodyY, bodyW, bodyH, bodyR);
-  }
-
-  // Chonk glow — pulsing outline when chonking up (not on title screen)
-  if (chonkLevel > 0 && !megaChonkActive && !titleScreenMode) {
-    ctx.save();
-    var glowColors = ['#FFD700', '#FF8C00', '#FF4500', '#FF0000'];
-    ctx.strokeStyle = glowColors[Math.min(chonkLevel - 1, 3)];
-    ctx.lineWidth = 2;
-    ctx.shadowColor = glowColors[Math.min(chonkLevel - 1, 3)];
-    ctx.shadowBlur = 8 + Math.sin(Date.now() / 150) * 4;
-    if (chonkLevel >= 4) {
-      var circR2 = Math.max(bodyW, bodyH) / 2;
-      ctx.beginPath();
-      ctx.arc(midX, bodyY + bodyH / 2, circR2 + 2, 0, Math.PI * 2);
-      ctx.stroke();
-    } else {
-      ctx.strokeStyle = glowColors[Math.min(chonkLevel - 1, 3)];
-      ctx.beginPath();
-      ctx.moveTo(bodyX + bodyR, bodyY - 1);
-      ctx.lineTo(bodyX + bodyW - bodyR, bodyY - 1);
-      ctx.arcTo(bodyX + bodyW + 1, bodyY - 1, bodyX + bodyW + 1, bodyY + bodyR, bodyR);
-      ctx.lineTo(bodyX + bodyW + 1, bodyY + bodyH - bodyR);
-      ctx.arcTo(bodyX + bodyW + 1, bodyY + bodyH + 1, bodyX + bodyW - bodyR, bodyY + bodyH + 1, bodyR);
-      ctx.lineTo(bodyX + bodyR, bodyY + bodyH + 1);
-      ctx.arcTo(bodyX - 1, bodyY + bodyH + 1, bodyX - 1, bodyY + bodyH - bodyR, bodyR);
-      ctx.lineTo(bodyX - 1, bodyY + bodyR);
-      ctx.arcTo(bodyX - 1, bodyY - 1, bodyX + bodyR, bodyY - 1, bodyR);
-      ctx.closePath();
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   // Belly highlight (scales with body)
@@ -1845,7 +1860,7 @@ function checkAABBCollision(a, b) {
 }
 
 function checkAllCollisions() {
-  if (invincibleTimer > 0) return; // can't be hit during invincibility
+  if (invincibleTimer > 0 || megaChonkActive) return; // can't be hit during invincibility or MEGA CHONK
 
   for (var i = 0; i < vacuums.length; i++) {
     if (checkAABBCollision(cat, vacuums[i])) {
@@ -1916,7 +1931,7 @@ const WAVES = [
 
 let currentWave = 0;
 let waveAnnouncementTimer = 0;
-const WAVE_ANNOUNCE_DURATION = 4; // seconds the wave text shows (with fade)
+const WAVE_ANNOUNCE_DURATION = 2.5; // seconds the wave text shows (with fade)
 let waveAnnounceName = '';
 let waveAnnounceSubtitle = '';
 let waveAnnounceColor = '';
@@ -1945,13 +1960,13 @@ function drawWaveAnnouncement() {
   if (waveAnnouncementTimer <= 0) return;
 
   var alpha;
-  // Fade in for first 0.5s, stay for 2s, fade out for last 1.5s
+  // Fade in for first 0.5s, stay for 1s, fade out for last 1s
   if (waveAnnouncementTimer > WAVE_ANNOUNCE_DURATION - 0.5) {
     alpha = (WAVE_ANNOUNCE_DURATION - waveAnnouncementTimer) / 0.5;
-  } else if (waveAnnouncementTimer > 1.5) {
+  } else if (waveAnnouncementTimer > 1.0) {
     alpha = 1;
   } else {
-    alpha = waveAnnouncementTimer / 1.5;
+    alpha = waveAnnouncementTimer / 1.0;
   }
 
   ctx.save();
@@ -2441,16 +2456,16 @@ function drawChonkAnnouncement() {
 }
 
 function drawChonkHUD() {
-  // Burger progress indicator at bottom-left
+  // Burger progress indicator at bottom-center
   if (megaChonkActive || chonkBurgers > 0 || chonkShrinkTimer > 0) {
     ctx.save();
 
-    var hudX = 12;
+    var hudX = W / 2;
     var hudY = H - 52;
 
     ctx.fillStyle = '#FF8C00';
     ctx.font = sf(7);
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'center';
 
     if (megaChonkActive) {
       // Show laser timer
@@ -2467,9 +2482,11 @@ function drawChonkHUD() {
       ctx.fillText('ACTIVATING...', hudX, hudY);
     } else {
       ctx.fillText('CHONK', hudX, hudY);
-      // Draw 4 burger slots
+      // Draw 4 burger slots (centered under CHONK text)
+      var totalBurgerWidth = CHONK_BURGERS_NEEDED * 16;
+      var burgerStartX = hudX - totalBurgerWidth / 2;
       for (var i = 0; i < CHONK_BURGERS_NEEDED; i++) {
-        var slotX = hudX + i * 16;
+        var slotX = burgerStartX + i * 16;
         var slotY = hudY + 5;
         if (i < chonkBurgers) {
           // Filled burger slot — mini burger
@@ -2499,10 +2516,10 @@ function drawMagnetHUD() {
   ctx.save();
   ctx.fillStyle = '#FF4444';
   ctx.font = sf(7);
-  ctx.textAlign = 'left';
+  ctx.textAlign = 'center';
   ctx.globalAlpha = 0.9;
   var timeLeft = Math.ceil(magnetTimer);
-  ctx.fillText('MAGNET ' + timeLeft + 's', 12, H - 52);
+  ctx.fillText('MAGNET ' + timeLeft + 's', W / 2, H - 74);
   ctx.restore();
 }
 
@@ -2564,12 +2581,6 @@ function drawHUD() {
     var ly = 24 + Math.floor(i / 5) * 16;
     drawMiniCatFace(lx, ly);
   }
-
-  // Vacuum spawn rate
-  ctx.fillStyle = '#FF6B6B';
-  ctx.font = sf(7);
-  ctx.textAlign = 'right';
-  ctx.fillText('Vac/s: ' + vacuumSpawnRate, W - 10, lives > 5 ? 58 : 48);
 
   ctx.restore();
 }
@@ -2662,16 +2673,21 @@ function drawTitleScreen() {
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    // Skin label below cat — name if unlocked, points needed if locked
+    // Skin label below cat — always show name, show pts below when locked
     ctx.font = sf(6);
     ctx.textAlign = 'center';
     ctx.globalAlpha = 0.8;
     if (unlockedSkins[selectedSkinIndex]) {
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(CAT_SKINS[selectedSkinIndex].name, W / 2, titleCatY + CAT_SIZE + 24);
     } else {
+      ctx.fillStyle = '#888899';
+    }
+    ctx.fillText(CAT_SKINS[selectedSkinIndex].name, W / 2, titleCatY + CAT_SIZE + 24);
+    // Points needed (only when locked)
+    if (!unlockedSkins[selectedSkinIndex]) {
       ctx.fillStyle = '#ff6b6b';
-      ctx.fillText(CAT_SKINS[selectedSkinIndex].score + ' pts to unlock', W / 2, titleCatY + CAT_SIZE + 24);
+      ctx.font = sf(5);
+      ctx.fillText(CAT_SKINS[selectedSkinIndex].score + ' pts to unlock', W / 2, titleCatY + CAT_SIZE + 38);
     }
     ctx.globalAlpha = 1;
   }
